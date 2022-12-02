@@ -1,0 +1,8 @@
+obj
+bin
+
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
