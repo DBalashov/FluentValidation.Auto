@@ -5,10 +5,9 @@ namespace FluentValidation.Auto;
 
 sealed class ModelValidator : IModelValidator
 {
-    static readonly Dictionary<Type, Type> validationContextTypeCache = new();
-    static readonly object                 sync                       = new();
-
-    readonly Type validatorType;
+    static readonly ReaderWriterLockSlim              rwLock                     = new();
+    static readonly Dictionary<Type, ConstructorInfo> validationContextTypeCache = new();
+    readonly        Type                              validatorType;
 
     public ModelValidator(Type validatorType) => this.validatorType = validatorType;
 
@@ -31,23 +30,34 @@ sealed class ModelValidator : IModelValidator
 
     ConstructorInfo getValidatorInstance(Type modelType)
     {
-        Type? genericType;
-        lock (sync)
+        rwLock.EnterUpgradeableReadLock();
+        if (!validationContextTypeCache.TryGetValue(modelType, out var constructorInfo))
         {
-            if (!validationContextTypeCache.TryGetValue(modelType, out genericType))
+            rwLock.EnterWriteLock();
+            try
             {
-                genericType = typeof(ValidationContext<>).MakeGenericType(modelType);
-                validationContextTypeCache.Add(modelType, genericType);
+                if (!validationContextTypeCache.TryGetValue(modelType, out constructorInfo))
+                {
+                    var genericType = typeof(ValidationContext<>).MakeGenericType(modelType);
+                    
+                    constructorInfo = genericType.GetConstructors().MinBy(p => p.GetParameters().Length);
+                    if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
+                        throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
+
+                    validationContextTypeCache.Add(modelType, constructorInfo);
+                }
+            }
+            finally
+            {
+                rwLock.ExitWriteLock();
             }
         }
 
-        var constructorInfo = genericType
-                             .GetConstructors()
-                             .OrderBy(p => p.GetParameters().Length)
-                             .FirstOrDefault();
+        rwLock.ExitUpgradeableReadLock();
 
-        if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
-            throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
+        // var constructorInfo = genericType.GetConstructors().MinBy(p => p.GetParameters().Length);
+        // if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
+        //     throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
 
         return constructorInfo;
     }
