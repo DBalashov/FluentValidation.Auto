@@ -3,21 +3,17 @@ using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
 
 namespace FluentValidation.Auto;
 
-sealed class ModelValidator : IModelValidator
+sealed class ModelValidator(Type type) : IModelValidator
 {
     static readonly ReaderWriterLockSlim              rwLock                     = new();
     static readonly Dictionary<Type, ConstructorInfo> validationContextTypeCache = new();
-    readonly        Type                              validatorType;
-
-    public ModelValidator(Type validatorType) => this.validatorType = validatorType;
 
     public IEnumerable<ModelValidationResult> Validate(ModelValidationContext context)
     {
         if (context.Model == null) return Array.Empty<ModelValidationResult>(); // empty model -> no validations
 
-        var validator = context.ActionContext.HttpContext.RequestServices.GetService(validatorType) as IValidator;
-        if (validator == null)
-            throw new FluentValidatorAutoException("Can't found validator by type: {0}", validatorType);
+        if (context.ActionContext.HttpContext.RequestServices.GetService(type) is not IValidator validator)
+            throw new FluentValidatorAutoException("Validator for type {0} must be registered as scoped service", type);
 
         var constructorInfo   = getValidatorInstance(context.Model.GetType());
         var validatorInstance = constructorInfo.Invoke(new[] {context.Model});
@@ -31,34 +27,35 @@ sealed class ModelValidator : IModelValidator
     ConstructorInfo getValidatorInstance(Type modelType)
     {
         rwLock.EnterUpgradeableReadLock();
-        if (!validationContextTypeCache.TryGetValue(modelType, out var constructorInfo))
+        try
         {
+            if (validationContextTypeCache.TryGetValue(modelType, out var constructorInfo))
+                return constructorInfo;
+
             rwLock.EnterWriteLock();
             try
             {
-                if (!validationContextTypeCache.TryGetValue(modelType, out constructorInfo))
-                {
-                    var genericType = typeof(ValidationContext<>).MakeGenericType(modelType);
-                    
-                    constructorInfo = genericType.GetConstructors().MinBy(p => p.GetParameters().Length);
-                    if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
-                        throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
+                if (validationContextTypeCache.TryGetValue(modelType, out constructorInfo))
+                    return constructorInfo;
 
-                    validationContextTypeCache.Add(modelType, constructorInfo);
-                }
+                var genericType = typeof(ValidationContext<>).MakeGenericType(modelType);
+
+                constructorInfo = genericType.GetConstructors().MinBy(p => p.GetParameters().Length);
+                if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
+                    throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
+
+                validationContextTypeCache.Add(modelType, constructorInfo);
+
+                return constructorInfo;
             }
             finally
             {
                 rwLock.ExitWriteLock();
             }
         }
-
-        rwLock.ExitUpgradeableReadLock();
-
-        // var constructorInfo = genericType.GetConstructors().MinBy(p => p.GetParameters().Length);
-        // if (constructorInfo == null || constructorInfo.GetParameters().Length != 1)
-        //     throw new FluentValidatorAutoException("Can't find constructor with one parameter for {0}", genericType);
-
-        return constructorInfo;
+        finally
+        {
+            rwLock.ExitUpgradeableReadLock();
+        }
     }
 }
