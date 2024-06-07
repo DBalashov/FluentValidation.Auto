@@ -1,19 +1,31 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace FluentValidation.Auto;
 
+/// <summary>
+/// <param name="errors">List of errors [property:errors]. Passed only invalid properties (with at least one error)</param>
+/// <returns>Must return object for serialization or null for no content</returns>
+/// </summary>
+public delegate object? FluentValidationErrorFormatter(HttpContext ctx, Dictionary<string, string[]> errors);
+
 public static class Register
 {
+    /// <summary> Add automatic FluentValidation calling for input models </summary>
     public static MvcOptions AddAutoValidation(this MvcOptions o)
     {
         o.ModelValidatorProviders.Add(new ModelValidatorProvider());
         return o;
     }
     
-    public static IMvcBuilder AddAutoValidationError(this IMvcBuilder builder, string messageTitle = "Validation error")
+    /// <summary>
+    /// Add optional automatic error formatter for FluentValidation errors.
+    /// If formatter is null, default error formatter will be used (<see cref="ErrorResult"/>).
+    /// </summary>
+    public static IMvcBuilder AddAutoValidationErrorFormatter(this IMvcBuilder builder, FluentValidationErrorFormatter? formatter = null)
     {
         builder.ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory =
                                                      ctx =>
@@ -27,12 +39,18 @@ public static class Register
                                                                          .Where(p => p.Value is {ValidationState: ModelValidationState.Invalid})
                                                                          .GroupBy(p => p.Key)
                                                                          .ToDictionary(p => p.Key,
-                                                                                       p => p.First().Value!.Errors.Select(c => c.ErrorMessage).ToArray());
+                                                                                       p => p.First().Value!.Errors.Select(c => c.ErrorMessage).ToArray(),
+                                                                                       StringComparer.Ordinal);
                                                          
                                                          var errLog = string.Join(", ", err400.Select(p => p.Key + ": " + string.Join(",", p.Value)));
                                                          logger.LogWarning("{0}: {1} -> {2}", ctx.HttpContext.Request.Method, ctx.HttpContext.Request.Path, errLog);
                                                          
-                                                         return new ObjectResult(new ErrorResult(ctx.HttpContext.TraceIdentifier, messageTitle, Errors: err400)) {StatusCode = 400};
+                                                         var outputResult = formatter != null
+                                                                                ? formatter(ctx.HttpContext, err400)
+                                                                                : new ErrorResult(ctx.HttpContext.TraceIdentifier, "Validation error",
+                                                                                                  Errors: err400);
+                                                         
+                                                         return outputResult == null ? new BadRequestResult() : new ObjectResult(outputResult) {StatusCode = 400};
                                                      });
         
         return builder;
