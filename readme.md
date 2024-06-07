@@ -2,7 +2,7 @@
 
 ### Add packages
 * FluentValidation
-* FluentValidation.Auto
+* FluentValidationAuto
 
 ### Add configuration in Startup class
 ![config.png](images/config.png)
