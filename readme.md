@@ -16,7 +16,7 @@ public sealed class Startup(IConfiguration configuration)
         services.AddControllersWithViews(configure)
                 .AddAutoValidationErrorFormatter();
         
-        // or add customt error formatter 
+        // or add custom error formatter 
         // services.AddControllersWithViews(configure)
         //         .AddAutoValidationErrorFormatter((ctx, errors) => new ErrorResult(ctx.TraceIdentifier, "Validation error", Errors: errors));
         
