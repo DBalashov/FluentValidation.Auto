@@ -10,18 +10,16 @@ sealed class ModelValidator(Type type) : IModelValidator
 
     public IEnumerable<ModelValidationResult> Validate(ModelValidationContext context)
     {
-        if (context.Model == null) return Array.Empty<ModelValidationResult>(); // empty model -> no validations
+        if (context.Model == null) return []; // empty model -> no validations
 
         if (context.ActionContext.HttpContext.RequestServices.GetService(type) is not IValidator validator)
             throw new FluentValidatorAutoException("Validator for type {0} must be registered as scoped service", type);
 
         var constructorInfo   = getValidatorInstance(context.Model.GetType());
-        var validatorInstance = constructorInfo.Invoke(new[] {context.Model});
+        var validatorInstance = constructorInfo.Invoke([context.Model]);
 
         var r = validator.Validate(validatorInstance as IValidationContext);
-        return r.IsValid
-                   ? Array.Empty<ModelValidationResult>()
-                   : r.Errors.Select(p => new ModelValidationResult(p.PropertyName, p.ErrorMessage)).ToArray();
+        return r.IsValid ? [] : r.Errors.Select(p => new ModelValidationResult(p.PropertyName, p.ErrorMessage)).ToArray();
     }
 
     ConstructorInfo getValidatorInstance(Type modelType)
