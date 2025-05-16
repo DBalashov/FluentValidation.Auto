@@ -20,39 +20,42 @@ public static class Register
         o.ModelValidatorProviders.Add(new ModelValidatorProvider());
         return o;
     }
-    
+
+    [Obsolete("Use IServiceCollection.AddAutoValidationErrorFormatter", true)]
+    public static IMvcBuilder AddAutoValidationErrorFormatter(this IMvcBuilder builder, FluentValidationErrorFormatter? formatter = null) => builder;
+
     /// <summary>
     /// Add optional automatic error formatter for FluentValidation errors.
     /// If formatter is null, default error formatter will be used (<see cref="ErrorResult"/>).
     /// </summary>
-    public static IMvcBuilder AddAutoValidationErrorFormatter(this IMvcBuilder builder, FluentValidationErrorFormatter? formatter = null)
+    public static IServiceCollection AddAutoValidationErrorFormatter(this IServiceCollection builder, FluentValidationErrorFormatter? formatter = null)
     {
-        builder.ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory =
-                                                     ctx =>
-                                                     {
-                                                         var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<IMvcBuilder>>();
-                                                         
-                                                         if (ctx.ModelState.ValidationState != ModelValidationState.Invalid)
-                                                             return new ObjectResult(new ErrorResult(ctx.HttpContext.TraceIdentifier, "Unknown error")) {StatusCode = 400};
-                                                         
-                                                         var err400 = ctx.ModelState
-                                                                         .Where(p => p.Value is {ValidationState: ModelValidationState.Invalid})
-                                                                         .GroupBy(p => p.Key)
-                                                                         .ToDictionary(p => p.Key,
-                                                                                       p => p.First().Value!.Errors.Select(c => c.ErrorMessage).ToArray(),
-                                                                                       StringComparer.Ordinal);
-                                                         
-                                                         var errLog = string.Join(", ", err400.Select(p => p.Key + ": " + string.Join(",", p.Value)));
-                                                         logger.LogWarning("{0}: {1} -> {2}", ctx.HttpContext.Request.Method, ctx.HttpContext.Request.Path, errLog);
-                                                         
-                                                         var outputResult = formatter != null
-                                                                                ? formatter(ctx.HttpContext, err400)
-                                                                                : new ErrorResult(ctx.HttpContext.TraceIdentifier, "Validation error",
-                                                                                                  Errors: err400);
-                                                         
-                                                         return outputResult == null ? new BadRequestResult() : new ObjectResult(outputResult) {StatusCode = 400};
-                                                     });
-        
+        builder.Configure<ApiBehaviorOptions>(o => o.InvalidModelStateResponseFactory =
+                                                       ctx =>
+                                                       {
+                                                           var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<IMvcBuilder>>();
+
+                                                           if (ctx.ModelState.ValidationState != ModelValidationState.Invalid)
+                                                               return new ObjectResult(new ErrorResult(ctx.HttpContext.TraceIdentifier, "Unknown error")) {StatusCode = 400};
+
+                                                           var err400 = ctx.ModelState
+                                                                           .Where(p => p.Value is {ValidationState: ModelValidationState.Invalid})
+                                                                           .GroupBy(p => p.Key)
+                                                                           .ToDictionary(p => p.Key,
+                                                                                         p => p.First().Value!.Errors.Select(c => c.ErrorMessage).ToArray(),
+                                                                                         StringComparer.Ordinal);
+
+                                                           var errLog = string.Join(", ", err400.Select(p => p.Key + ": " + string.Join(",", p.Value)));
+                                                           logger.LogWarning("{0}: {1} -> {2}", ctx.HttpContext.Request.Method, ctx.HttpContext.Request.Path, errLog);
+
+                                                           var outputResult = formatter != null
+                                                                                  ? formatter(ctx.HttpContext, err400)
+                                                                                  : new ErrorResult(ctx.HttpContext.TraceIdentifier, "Validation error",
+                                                                                                    Errors: err400);
+
+                                                           return outputResult == null ? new BadRequestResult() : new ObjectResult(outputResult) {StatusCode = 400};
+                                                       });
+
         return builder;
     }
 }
